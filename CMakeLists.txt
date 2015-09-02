@@ -28,5 +28,8 @@ add_executable(null_dereference_2 null_dereference_2.cpp )
 add_executable(use_after_move use_after_move.cpp )
 add_executable(duplicate_branch_1 duplicate_branch_1.cpp )
 add_executable(duplicate_branch_2 duplicate_branch_2.cpp )
+add_executable(capture_local_by_reference capture_local_by_reference.cpp )
+
+
 
 
