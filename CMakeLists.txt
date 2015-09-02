@@ -16,12 +16,15 @@ else()
   add_definitions(-Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Wcast-qual -Wunused -Woverloaded-virtual  -pedantic )
 
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    add_definitions(-Weverything)
+    add_definitions(-Weverything -Wno-c++98-compat -Wno-missing-prototypes)
   endif()
+
 
 endif()
 
 
+add_executable(null_dereference_1 null_dereference_1.cpp )
+add_executable(null_dereference_2 null_dereference_2.cpp )
 add_executable(use_after_move use_after_move.cpp )
 add_executable(duplicate_branch_1 duplicate_branch_1.cpp )
 add_executable(duplicate_branch_2 duplicate_branch_2.cpp )
