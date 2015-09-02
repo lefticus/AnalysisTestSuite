@@ -14,6 +14,8 @@ namespace duplicate_branch_2 {
 
       return true;
     }
+
+    return false;
   }
 
 }
