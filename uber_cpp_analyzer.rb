@@ -228,20 +228,20 @@ def cmake_configure(src_dir, output_dir, generator, enable_compile_commands)
   run_script(output_dir, ["cmake #{src_dir} -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON"])
 end
 
-def get_compile_commands(src_dir)
-
+def with_compile_commands(src_dir)
   Dir.mktmpdir { |dir|
     cmake_configure(src_dir, dir, "Unix Makefiles", true)
-    return JSON.load(File.open(File.join(dir, "compile_commands.json")))
+    yield File.join(dir, "compile_commands.json"), dir
   }
 
 end
 
+def get_compile_commands(compile_commands)
+  return JSON.load(File.open(compile_commands))
+end
 
-def get_include_dirs(src_dir)
 
-  commands = get_compile_commands(src_dir)
-
+def get_include_dirs(commands)
   includes = Set.new()
 
   commands.each { |c|
@@ -253,54 +253,103 @@ def get_include_dirs(src_dir)
   return includes.to_a
 end
 
-def get_cpp_files(src_dir)
-
-  commands = get_compile_commands(src_dir)
-
+def get_cpp_files(commands)
   files = Set.new()
 
   commands.each { |c|
-    c["command"].scan(/(\S+\.(cc|cpp|c\+\+))/) { |m|
-      files.add(m[0].to_s)
-    }
+    files.add(c["file"])
   }
 
   return files.to_a
-
 end
 
 def run_cppcheck(src_dir)
-  includes = get_include_dirs(src_dir).collect { |i| " -I " + i }.join("")
-  files = get_cpp_files(src_dir).to_a.join(" ")
+  results = []
 
-  out, err, result = 
-    run_script(src_dir, ["cppcheck #{includes} #{files} --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
+  with_compile_commands(src_dir) { |compile_commands, working_dir|
 
-  err.split("\n").each { |e| 
-    puts("Parsing: '#{e}'")
-    obj = JSON.load(e)
-    obj["file"] = File.absolute_path(obj["file"], src_dir);
+    commands = get_compile_commands(compile_commands)
+    includes = get_include_dirs(commands).collect { |i| " -I " + i }.join("")
+    files = get_cpp_files(commands).to_a.join(" ")
+
+
+    out, err, result = 
+      run_script(src_dir, ["cppcheck #{includes} #{files} --enable=all --inconclusive --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
+
+    err.split("\n").each { |e| 
+      begin
+        obj = JSON.load(e)
+        obj["file"] = File.absolute_path(obj["file"], src_dir)
+        obj["tool"] = "cppcheck"
+        results << obj
+      rescue 
+        $logger.error("Unable to parse cppcheck output: '#{e}'")
+      end
+    }
   }
+
+  return results
 end
 
-def run_clang_check(src_dir)
-  files = get_cpp_files(src_dir).to_a.join(" ")
+def run_clang_check(src_dir, analyze = false)
+  results = []
 
-  out, err, result = 
-    run_script(src_dir, ["cppcheck #{includes} #{files} --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
+  with_compile_commands(src_dir) { |compile_commands, working_dir|
 
-  err.split("\n").each { |e| 
-    puts("Parsing: '#{e}'")
-    obj = JSON.load(e)
-    obj["file"] = File.absolute_path(obj["file"], src_dir);
+    commands = get_compile_commands(compile_commands)
+    files = get_cpp_files(commands).to_a.join(" ")
+
+    out, err, result = 
+      run_script(src_dir, ["clang-check-3.8 -p #{compile_commands} #{files} #{analyze ? "-analyze" : "" }"])
+
+    err.split("\n").each { |e| 
+      puts("Parsing: '#{e}'")
+      /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
+
+      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
+        results << { "tool" => "clang-check#{ analyze ? "-analyze" : "" }", "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
+      end
+    }
   }
+
+  return results
+end
+
+def run_metrix_pp(src_dir, analyze = false)
+  results = []
+
+  with_compile_commands(src_dir) { |compile_commands, working_dir|
+
+    commands = get_compile_commands(compile_commands)
+    files = get_cpp_files(commands).to_a.join(" ")
+
+    run_script(working_dir, ["python /home/jason/Downloads/metrixplusplus-1.3.168/metrix++.py collect --sclent --sclc --scmn --scmns --sccc --sccmi  #{src_dir} "])
+
+    out, err, result = 
+      run_script(working_dir, ["python /home/jason/Downloads/metrixplusplus-1.3.168/metrix++.py limit --max-limit=std.code.complexity:cyclomatic:15"])
+
+    out.split("\n").each { |e| 
+      puts("Parsing: '#{e}'")
+      /(?<filename>.*):(?<linenumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
+
+      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
+        results << { "tool" => "metrix++", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message }
+      end
+    }
+  }
+
+  return results
 end
 
 
+results = []
 
-# run_cppcheck(File.absolute_path(ARGV[0]))
+results.concat(run_cppcheck(File.absolute_path(ARGV[0])))
+results.concat(run_clang_check(File.absolute_path(ARGV[0])))
+results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
+results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
 
-run_clang_check(File.absolute_path(ARGV[0]))
+puts(JSON.pretty_generate(results))
 
 #get_include_dirs(File.absolute_path(ARGV[0]))
 #
