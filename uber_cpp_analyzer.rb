@@ -224,8 +224,8 @@ def get_sha(src_dir)
   run_script(src_dir, ["git rev-parse HEAD"])
 end
 
-def cmake_configure(src_dir, output_dir, generator, enable_compile_commands)
-  run_script(output_dir, ["cmake #{src_dir} -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON"])
+def cmake_configure(src_dir, output_dir, generator, enable_compile_commands, env = {})
+  run_script(output_dir, ["cmake #{src_dir} -G \"#{generator}\" #{ enable_compile_commands ? "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON" : "" } "], env)
 end
 
 def with_compile_commands(src_dir)
@@ -233,7 +233,17 @@ def with_compile_commands(src_dir)
     cmake_configure(src_dir, dir, "Unix Makefiles", true)
     yield File.join(dir, "compile_commands.json"), dir
   }
+end
 
+def with_configured_dir(src_dir, generator, env)
+  Dir.mktmpdir { |dir|
+    cmake_configure(src_dir, dir, generator, false, env)
+    yield dir
+  }
+end
+
+def build(dir, configuration)
+  return run_script(dir, ["cmake --build . --config #{configuration}"])
 end
 
 def get_compile_commands(compile_commands)
@@ -378,6 +388,26 @@ def run_pmd_cpd(src_dir)
   return results
 end
 
+def run_msvc_analyze(src_dir)
+  results = []
+
+  with_configured_dir(src_dir, "Visual Studio 14 2015",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
+    out, err, result = build(dir, "Debug")
+    out.split("\n").each { |e|
+#    '  c:\programming\analysistestsuite\null_dereference_1.cpp(6): warning C6011: Dereferencing NULL pointer 'i'. : Lines: 5, 6 [C:\Users\Jason\AppData\Local\Temp\d20150905-16148-ptlxn0\null_dereference_1.vcxproj]'
+      puts("Parsing: '#{e}'")
+
+      /\s*(?<filename>.*)\((?<linenumber>[0-9]+)\): (?<messagetype>\S+) (?<id>\S+): (?<message>[^:]+) : .*/ =~ e
+
+      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
+        results << { "tool" => "msvc", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message, "id" => id }
+      end
+    }
+  }
+
+  return results
+end
+
 
 results = []
 
@@ -385,7 +415,9 @@ results = []
 #results.concat(run_clang_check(File.absolute_path(ARGV[0])))
 #results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
 #results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
-results.concat(run_pmd_cpd(File.absolute_path(ARGV[0])))
+#results.concat(run_pmd_cpd(File.absolute_path(ARGV[0])))
+results.concat(run_msvc_analyze(File.absolute_path(ARGV[0])))
+
 
 puts(JSON.pretty_generate(results))
 
