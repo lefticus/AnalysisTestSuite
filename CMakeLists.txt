@@ -31,6 +31,9 @@ add_executable(capture_local_by_reference capture_local_by_reference.cpp )
 add_executable(capture_local_uninitialized capture_local_uninitialized.cpp )
 add_executable(capture_local_uninitialized_by_ref capture_local_uninitialized_by_ref.cpp )
 add_executable(assert_with_side_effects assert_with_side_effects.cpp )
+add_executable(loss_of_sign loss_of_sign.cpp )
+add_executable(loss_of_precision loss_of_precision.cpp )
+add_executable(loss_of_sign_and_precision loss_of_sign_and_precision.cpp )
 
 
 
