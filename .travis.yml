@@ -1,0 +1,17 @@
+language: cpp
+compiler:
+  - gcc
+  - clang
+
+script: 
+  - if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then cmake -D CMAKE_BUILD_TYPE:STRING=Debug  . ; fi
+  - if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then make -j2 ; fi
+
+notifications:
+  email:
+    recipients:
+      - jason@emptycrate.com
+    on_success: always
+    on_failure: always
+
+
