@@ -313,7 +313,6 @@ def run_clang_check(src_dir, analyze = false)
       run_script(src_dir, ["clang-check-3.8 -p #{compile_commands} #{files} #{analyze ? "-analyze" : "" }"])
 
     err.split("\n").each { |e| 
-      puts("Parsing: '#{e}'")
       /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
 
       if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
@@ -339,7 +338,6 @@ def run_metrix_pp(src_dir)
       run_script(working_dir, ["python /home/jason/Downloads/metrixplusplus-1.3.168/metrix++.py limit --max-limit=std.code.complexity:cyclomatic:15"])
 
     out.split("\n").each { |e| 
-      puts("Parsing: '#{e}'")
       /(?<filename>.*):(?<linenumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
 
       if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
@@ -362,7 +360,6 @@ def run_pmd_cpd(src_dir)
   dups = []
 
   out.split("\n").each { |e| 
-    puts("Parsing: '#{e}'")
 
     if numlines != 0
       /Starting at line (?<linenum>[0-9]+) of (?<filename>.*)/ =~ e
@@ -388,35 +385,55 @@ def run_pmd_cpd(src_dir)
   return results
 end
 
-def run_msvc_analyze(src_dir)
+def parse_msvc_results(output)
   results = []
 
-  with_configured_dir(src_dir, "Visual Studio 14 2015",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
-    out, err, result = build(dir, "Debug")
-    out.split("\n").each { |e|
-#    '  c:\programming\analysistestsuite\null_dereference_1.cpp(6): warning C6011: Dereferencing NULL pointer 'i'. : Lines: 5, 6 [C:\Users\Jason\AppData\Local\Temp\d20150905-16148-ptlxn0\null_dereference_1.vcxproj]'
-      puts("Parsing: '#{e}'")
+  output.split("\n").each { |e|
+    /\s*(?<filename>.*)\((?<linenumber>[0-9]+)\): (?<messagetype>\S+) (?<id>\S+): (?<message>.+) \[.*\]/ =~ e
 
-      /\s*(?<filename>.*)\((?<linenumber>[0-9]+)\): (?<messagetype>\S+) (?<id>\S+): (?<message>[^:]+) : .*/ =~ e
-
-      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
-        results << { "tool" => "msvc", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message, "id" => id }
-      end
-    }
+    if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
+      results << { "tool" => "msvc", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message, "id" => id }
+    end
   }
 
   return results
+
+end
+
+def run_msvc_analyze(src_dir, configuration)
+  with_configured_dir(src_dir, "Visual Studio 14 2015",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
+    out, err, result = build(dir, configuration)
+
+    return parse_msvc_results(out)
+  }
+end
+
+def run_msvc_64_analyze(src_dir, configuration)
+  with_configured_dir(src_dir, "Visual Studio 14 2015 Win64",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
+    out, err, result = build(dir, configuration)
+
+    return parse_msvc_results(out)
+  }
 end
 
 
+def try_and_log(&block)
+  begin
+    block.call
+  rescue => e
+    $logger.error("unable to run test #{e}")
+  end
+end
+
 results = []
 
-results.concat(run_cppcheck(File.absolute_path(ARGV[0])))
-results.concat(run_clang_check(File.absolute_path(ARGV[0])))
-results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
-results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
-results.concat(run_pmd_cpd(File.absolute_path(ARGV[0])))
-#results.concat(run_msvc_analyze(File.absolute_path(ARGV[0])))
+#try_and_log { results.concat(run_cppcheck(File.absolute_path(ARGV[0]))) }
+#try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]))) }
+#try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]), true)) }
+#try_and_log { results.concat(run_metrix_pp(File.absolute_path(ARGV[0]))) }
+#try_and_log { results.concat(run_pmd_cpd(File.absolute_path(ARGV[0]))) }
+try_and_log { results.concat(run_msvc_analyze(File.absolute_path(ARGV[0]), "Debug")) }
+try_and_log { results.concat(run_msvc_64_analyze(File.absolute_path(ARGV[0]), "Debug")) }
 
 
 puts(JSON.pretty_generate(results))
