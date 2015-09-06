@@ -8,6 +8,7 @@ namespace null_dereference_2 {
   void null_dereference_2() 
   {
     int *i = get_i();
+    // dereferencing returned null value
     *i = 5;
   }
 }

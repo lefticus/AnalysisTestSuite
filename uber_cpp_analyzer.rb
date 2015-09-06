@@ -411,12 +411,12 @@ end
 
 results = []
 
-#results.concat(run_cppcheck(File.absolute_path(ARGV[0])))
-#results.concat(run_clang_check(File.absolute_path(ARGV[0])))
-#results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
-#results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
-#results.concat(run_pmd_cpd(File.absolute_path(ARGV[0])))
-results.concat(run_msvc_analyze(File.absolute_path(ARGV[0])))
+results.concat(run_cppcheck(File.absolute_path(ARGV[0])))
+results.concat(run_clang_check(File.absolute_path(ARGV[0])))
+results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
+results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
+results.concat(run_pmd_cpd(File.absolute_path(ARGV[0])))
+#results.concat(run_msvc_analyze(File.absolute_path(ARGV[0])))
 
 
 puts(JSON.pretty_generate(results))

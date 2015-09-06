@@ -8,6 +8,7 @@ namespace duplicate_branch_2 {
   {
     if (test_value_1()) {
 
+      // this test is useless
       if (test_value_2()) {
         return true;
       }

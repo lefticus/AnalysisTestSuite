@@ -12,7 +12,7 @@ namespace use_after_move {
   {
     Object o;
     take(std::move(o));
-    o.doSomething();
+    o.doSomething(); // use of local after move
   }
 }
 

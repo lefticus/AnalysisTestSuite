@@ -30,6 +30,7 @@ add_executable(duplicate_branch_2 duplicate_branch_2.cpp )
 add_executable(capture_local_by_reference capture_local_by_reference.cpp )
 add_executable(capture_local_uninitialized capture_local_uninitialized.cpp )
 add_executable(capture_local_uninitialized_by_ref capture_local_uninitialized_by_ref.cpp )
+add_executable(assert_with_side_effects assert_with_side_effects.cpp )
 
 
 
