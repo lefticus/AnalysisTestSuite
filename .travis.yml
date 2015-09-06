@@ -3,6 +3,13 @@ compiler:
   - gcc
   - clang
 
+env:
+  global:
+    # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+    #   via the "travis encrypt" command using the project repo's public key
+    - secure: "ouxwqSUsv2RWqymtPQDvzDS2dWOjwUmALo39V68zWgy5JKCzrQjdxvlUcho5f4MGtzoUwZ0rkzC1YH/7q0hLAZbS/OgTI90SmmpgkVeaJP7r22jdxT8OZnItLwFar+7JSLPalqOvv1EWX4+FPLyEJxYxPbzwpuH6y5y72igpJK1Fj/SlgwSUsMnkXncOw2lNmO1TQHE7ftzb4yMXqXvE2Dg35hkxxN784nO7dROsx4jnMvb4Giwvo3isHjg87DEVUHRfa2Hmhb3088NASZG6Y0ObMixSnNPIsmTYGYA4xaBBMoLmYIeBfvHG6zqNh0y08/q9eWq1i6PGtgQ2uFuFPoXIGI5x89xBWDGUClcoR6ZZX0hClv95RtfB++mxqXeX2J/duHRvRNY6fErHcKimksqYqGsIhPuMYeQ61rwRFRqDV5IPUjHJc/fY2Bb8wVrtany49UjkygWp/BKyHBhrCxesyPa9DQ2/3feR0XZMs9WhVPOLLl6XApFjgzrWsuToeDwVpGJc9oCkvntyqTXItOUw4wzIkfo3xPOdHy2iDB3S0Du1zbmUSWQ8MRIeHzvVd6iJ3H+EfIvWdUBFqSYTQUufP0iVr1kfEPhcB65/+TnSRkEZM+w7csgilLNy3uJ1KR66aUvauv27f0I8r00QLhnqyfcjcszp/2YhvIu+9GI="
+
+
 script: 
   - if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then cmake -D CMAKE_BUILD_TYPE:STRING=Debug  . ; fi
   - if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then make -j2 ; fi
@@ -14,4 +21,12 @@ notifications:
     on_success: always
     on_failure: always
 
-
+addons:
+  coverity_scan:
+    project:
+      name: "lefticus/AnalysisTestSuite"
+      description: "Build submitted via Travis CI"
+      notification_email: jason@emptycrate.com
+      build_command_prepend: "cmake -D CMAKE_BUILD_TYPE:STRING=Debug . "
+      build_command:   "cmake --build . -- -j2"
+      # branch_pattern: coverity_scan
