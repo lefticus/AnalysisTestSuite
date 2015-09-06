@@ -315,7 +315,7 @@ def run_clang_check(src_dir, analyze = false)
   return results
 end
 
-def run_metrix_pp(src_dir, analyze = false)
+def run_metrix_pp(src_dir)
   results = []
 
   with_compile_commands(src_dir) { |compile_commands, working_dir|
@@ -341,13 +341,51 @@ def run_metrix_pp(src_dir, analyze = false)
   return results
 end
 
+def run_pmd_cpd(src_dir)
+  results = []
+
+
+  out, err, result = run_script(src_dir, ["/home/jason/Downloads/pmd-bin-5.3.3/bin/run.sh cpd --language cpp --minimum-tokens 100 --files .  "])
+
+
+  numlines = 0
+  dups = []
+
+  out.split("\n").each { |e| 
+    puts("Parsing: '#{e}'")
+
+    if numlines != 0
+      /Starting at line (?<linenum>[0-9]+) of (?<filename>.*)/ =~ e
+
+      if !linenum.nil? and !filename.nil?
+        dups << { "file" => filename, "line" => linenum }
+      else
+        results << { "tool" => "pmd_cpd", "severity" => "copy-paste", "numlines" => numlines, "locations" => dups }
+        dups = []
+        numlines = 0
+      end
+    else
+      /Found a (?<linecount>[0-9]+) line.*/ =~ e
+
+      if !linecount.nil?
+        numlines = linecount.to_i
+      else
+        numlines = 0
+      end
+    end
+  }
+
+  return results
+end
+
 
 results = []
 
-results.concat(run_cppcheck(File.absolute_path(ARGV[0])))
-results.concat(run_clang_check(File.absolute_path(ARGV[0])))
-results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
-results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
+#results.concat(run_cppcheck(File.absolute_path(ARGV[0])))
+#results.concat(run_clang_check(File.absolute_path(ARGV[0])))
+#results.concat(run_clang_check(File.absolute_path(ARGV[0]), true))
+#results.concat(run_metrix_pp(File.absolute_path(ARGV[0])))
+results.concat(run_pmd_cpd(File.absolute_path(ARGV[0])))
 
 puts(JSON.pretty_generate(results))
 
