@@ -10,7 +10,6 @@ project(AnalysisTestSuite)
 
 if(MSVC)
   add_definitions(/W4)
-  add_definitions(/analyze)
 else()
   add_definitions(-std=c++11)
   add_definitions(-Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Wcast-qual -Wunused -Woverloaded-virtual  -pedantic )
