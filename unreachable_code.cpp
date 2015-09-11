@@ -9,11 +9,11 @@ enum Enum
 
 int go(Enum t_enum) {
   switch (t_enum) {
-  case Enum::Value1:               
+  case Enum::Value1:
     return 0;
-  case Enum::Value2:               
+  case Enum::Value2:
     return 1;
-  default:                         
+  default:
     throw std::runtime_error("unknown value");
   }
   throw std::runtime_error("unknown value"); // this code is unreachable

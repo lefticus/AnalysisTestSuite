@@ -228,9 +228,9 @@ def cmake_configure(src_dir, output_dir, generator, enable_compile_commands, env
   run_script(output_dir, ["cmake #{src_dir} -G \"#{generator}\" #{ enable_compile_commands ? "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON" : "" } "], env)
 end
 
-def with_compile_commands(src_dir)
+def with_compile_commands(src_dir, env={})
   Dir.mktmpdir { |dir|
-    cmake_configure(src_dir, dir, "Unix Makefiles", true)
+    cmake_configure(src_dir, dir, "Unix Makefiles", true, env)
     yield File.join(dir, "compile_commands.json"), dir
   }
 end
@@ -284,7 +284,7 @@ def run_cppcheck(src_dir)
 
 
     out, err, result = 
-      run_script(src_dir, ["cppcheck #{includes} #{files} --enable=all --inconclusive --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
+      run_script(src_dir, ["/home/jason/Downloads/cppcheck-1.70/bin/cppcheck #{includes} #{files} --platform=win64 --enable=all --inconclusive --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
 
     err.split("\n").each { |e| 
       begin
@@ -304,7 +304,7 @@ end
 def run_clang_check(src_dir, analyze = false)
   results = []
 
-  with_compile_commands(src_dir) { |compile_commands, working_dir|
+  with_compile_commands(src_dir, {"CXX"=>"clang++-3.8", "CC"=>"clang-3.8"}) { |compile_commands, working_dir|
 
     commands = get_compile_commands(compile_commands)
     files = get_cpp_files(commands).to_a.join(" ")
@@ -427,11 +427,11 @@ end
 
 results = []
 
-#try_and_log { results.concat(run_cppcheck(File.absolute_path(ARGV[0]))) }
-#try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]))) }
-#try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]), true)) }
-#try_and_log { results.concat(run_metrix_pp(File.absolute_path(ARGV[0]))) }
-#try_and_log { results.concat(run_pmd_cpd(File.absolute_path(ARGV[0]))) }
+try_and_log { results.concat(run_cppcheck(File.absolute_path(ARGV[0]))) }
+try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]))) }
+try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]), true)) }
+try_and_log { results.concat(run_metrix_pp(File.absolute_path(ARGV[0]))) }
+try_and_log { results.concat(run_pmd_cpd(File.absolute_path(ARGV[0]))) }
 try_and_log { results.concat(run_msvc_analyze(File.absolute_path(ARGV[0]), "Debug")) }
 try_and_log { results.concat(run_msvc_64_analyze(File.absolute_path(ARGV[0]), "Debug")) }
 
