@@ -42,6 +42,9 @@ add_executable(unreachable_code unreachable_code.cpp )
 add_executable(unreachable_code_2 unreachable_code_2.cpp )
 add_executable(unreferenced_variadic unreferenced_variadic.cpp )
 add_executable(loop_over_empty_container loop_over_empty_container.cpp )
+add_executable(invalid_loop_arguments invalid_loop_arguments.cpp )
+add_executable(std_array_out_of_bounds std_array_out_of_bounds.cpp )
+add_executable(array_out_of_bounds array_out_of_bounds.cpp )
 
 
 
