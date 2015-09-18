@@ -301,6 +301,30 @@ def run_cppcheck(src_dir)
   return results
 end
 
+def run_clang_tidy(src_dir)
+  results = []
+
+  with_compile_commands(src_dir, {"CXX"=>"clang++-3.8", "CC"=>"clang-3.8"}) { |compile_commands, working_dir|
+
+    commands = get_compile_commands(compile_commands)
+    files = get_cpp_files(commands).to_a.join(" ")
+
+    out, err, result = 
+      run_script(src_dir, ["clang-tidy-3.8 -p #{compile_commands} #{files} -checks=*,-google* -header-filter=.*"])
+
+    out.split("\n").each { |e| 
+      /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
+
+      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
+        results << { "tool" => "clang-tidy", "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
+      end
+    }
+  }
+
+  return results
+end
+
+
 def run_clang_check(src_dir, analyze = false)
   results = []
 
@@ -430,6 +454,7 @@ results = []
 try_and_log { results.concat(run_cppcheck(File.absolute_path(ARGV[0]))) }
 try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]))) }
 try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]), true)) }
+try_and_log { results.concat(run_clang_tidy(File.absolute_path(ARGV[0]))) }
 try_and_log { results.concat(run_metrix_pp(File.absolute_path(ARGV[0]))) }
 try_and_log { results.concat(run_pmd_cpd(File.absolute_path(ARGV[0]))) }
 try_and_log { results.concat(run_msvc_analyze(File.absolute_path(ARGV[0]), "Debug")) }

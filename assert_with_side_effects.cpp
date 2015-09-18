@@ -12,4 +12,6 @@ int main()
 
   // this is bad because behavior changes between debug and release builds
   assert(assert_with_side_effects(i));
+
+  if (i < 5) { /* ... */ }
 }
