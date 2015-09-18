@@ -39,6 +39,7 @@ add_executable(loss_of_precision loss_of_precision.cpp )
 add_executable(loss_of_sign_and_precision loss_of_sign_and_precision.cpp )
 add_executable(binary_search binary_search.cpp )
 add_executable(unreachable_code unreachable_code.cpp )
+add_executable(unreachable_code_2 unreachable_code_2.cpp )
 add_executable(unreferenced_variadic unreferenced_variadic.cpp )
 add_executable(loop_over_empty_container loop_over_empty_container.cpp )
 
