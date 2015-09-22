@@ -9,5 +9,4 @@ int main()
 
   s = std::make_shared<int>(2);
   *p = 5;
-
 }
