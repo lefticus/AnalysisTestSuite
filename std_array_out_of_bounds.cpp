@@ -3,5 +3,5 @@
 int main()
 {
   std::array<int, 5> a;
-  return a[6];
+  return a[5];
 }
