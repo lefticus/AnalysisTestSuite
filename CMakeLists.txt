@@ -46,6 +46,7 @@ add_executable(invalid_loop_arguments invalid_loop_arguments.cpp )
 add_executable(std_array_out_of_bounds std_array_out_of_bounds.cpp )
 add_executable(array_out_of_bounds array_out_of_bounds.cpp )
 add_executable(reassigned_pointer reassigned_pointer.cpp )
+add_executable(iterator_mismatch iterator_mismatch.cpp )
 
 
 
