@@ -48,6 +48,7 @@ add_executable(array_out_of_bounds array_out_of_bounds.cpp )
 add_executable(reassigned_pointer reassigned_pointer.cpp )
 add_executable(iterator_mismatch iterator_mismatch.cpp )
 add_executable(reference_to_temporary reference_to_temporary.cpp )
+add_executable(identical_if identical_if.cpp)
 
 
 
