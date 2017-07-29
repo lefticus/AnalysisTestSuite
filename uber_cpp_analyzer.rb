@@ -273,7 +273,7 @@ def get_cpp_files(commands)
   return files.to_a
 end
 
-def run_cppcheck(src_dir)
+def run_cppcheck(src_dir, bin)
   results = []
 
   with_compile_commands(src_dir) { |compile_commands, working_dir|
@@ -284,13 +284,15 @@ def run_cppcheck(src_dir)
 
 
     out, err, result = 
-      run_script(src_dir, ["/home/jason/Downloads/cppcheck-1.70/bin/cppcheck #{includes} #{files} --platform=win64 --enable=all --inconclusive --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
+      run_script(src_dir, ["#{bin} #{includes} #{files} --platform=win64 --enable=all --inconclusive --template '{\"file\": \"{file}\", \"line\": {line}, \"severity\": \"{severity}\", \"id\": \"{id}\", \"message\": \"{message}\"}'"])
+
+    toolname = `#{bin} --version`.strip
 
     err.split("\n").each { |e| 
       begin
         obj = JSON.load(e)
         obj["file"] = File.absolute_path(obj["file"], src_dir)
-        obj["tool"] = "cppcheck"
+        obj["tool"] = toolname
         results << obj
       rescue 
         $logger.error("Unable to parse cppcheck output: '#{e}'")
@@ -301,51 +303,46 @@ def run_cppcheck(src_dir)
   return results
 end
 
-def run_clang_tidy(src_dir)
+def parse_gcc_clang_results(output, toolname)
   results = []
 
-  with_compile_commands(src_dir, {"CXX"=>"clang++-3.8", "CC"=>"clang-3.8"}) { |compile_commands, working_dir|
+  output.split("\n").each { |e| 
+    /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
 
-    commands = get_compile_commands(compile_commands)
-    files = get_cpp_files(commands).to_a.join(" ")
-
-    out, err, result = 
-      run_script(src_dir, ["clang-tidy-3.8 -p #{compile_commands} #{files} -checks=*,-google* -header-filter=.*"])
-
-    out.split("\n").each { |e| 
-      /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
-
-      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
-        results << { "tool" => "clang-tidy", "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
-      end
-    }
+    if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
+      results << { "tool" => toolname, "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
+    end
   }
 
   return results
 end
 
 
-def run_clang_check(src_dir, analyze = false)
-  results = []
-
-  with_compile_commands(src_dir, {"CXX"=>"clang++-3.8", "CC"=>"clang-3.8"}) { |compile_commands, working_dir|
+def run_clang_tidy(src_dir)
+  with_compile_commands(src_dir, {"CXX"=>"clang++-5.0", "CC"=>"clang-5.0"}) { |compile_commands, working_dir|
 
     commands = get_compile_commands(compile_commands)
     files = get_cpp_files(commands).to_a.join(" ")
 
     out, err, result = 
-      run_script(src_dir, ["clang-check-3.8 -p #{compile_commands} #{files} #{analyze ? "-analyze" : "" }"])
+      run_script(src_dir, ["clang-tidy-5.0 -p #{compile_commands} #{files} -checks=*,-google* -header-filter=.*"])
 
-    err.split("\n").each { |e| 
-      /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
-
-      if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
-        results << { "tool" => "clang-check#{ analyze ? "-analyze" : "" }", "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
-      end
-    }
+    return parse_gcc_clang_results(out, "clang-tidy")
   }
+end
 
-  return results
+
+def run_clang_check(src_dir, analyze = false)
+  with_compile_commands(src_dir, {"CXX"=>"clang++-5.0", "CC"=>"clang-5.0"}) { |compile_commands, working_dir|
+
+    commands = get_compile_commands(compile_commands)
+    files = get_cpp_files(commands).to_a.join(" ")
+
+    out, err, result = 
+      run_script(src_dir, ["clang-check-5.0 -p #{compile_commands} #{files} #{analyze ? "-analyze" : "" }"])
+
+    return parse_gcc_clang_results(err, "clang-check#{ analyze ? "-analyze" : "" }")
+  }
 end
 
 def run_metrix_pp(src_dir)
@@ -432,6 +429,23 @@ def run_msvc_analyze(src_dir, configuration)
   }
 end
 
+def run_gcc(src_dir, configuration)
+  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>"g++-6", "CC"=>"gcc-6", "CXXFLAGS"=>`./get_valid_gcc_flags.sh g++-6`}) { |dir|
+    out, err, result = build(dir, configuration)
+
+    return parse_gcc_clang_results(err, "g++-6")
+  }
+end
+
+def run_clang(src_dir, configuration)
+  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>"clang++-5.0", "CC"=>"clang-5.0", "CXXFLAGS"=>"-Weverything"}) { |dir|
+    out, err, result = build(dir, configuration)
+
+    return parse_gcc_clang_results(err, "clang++-5")
+  }
+end
+
+
 def run_msvc_64_analyze(src_dir, configuration)
   with_configured_dir(src_dir, "Visual Studio 14 2015 Win64",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
     out, err, result = build(dir, configuration)
@@ -451,17 +465,24 @@ end
 
 results = []
 
-try_and_log { results.concat(run_cppcheck(File.absolute_path(ARGV[0]))) }
-try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]))) }
-try_and_log { results.concat(run_clang_check(File.absolute_path(ARGV[0]), true)) }
-try_and_log { results.concat(run_clang_tidy(File.absolute_path(ARGV[0]))) }
-try_and_log { results.concat(run_metrix_pp(File.absolute_path(ARGV[0]))) }
-try_and_log { results.concat(run_pmd_cpd(File.absolute_path(ARGV[0]))) }
-try_and_log { results.concat(run_msvc_analyze(File.absolute_path(ARGV[0]), "Debug")) }
-try_and_log { results.concat(run_msvc_64_analyze(File.absolute_path(ARGV[0]), "Debug")) }
+project_path = File.absolute_path(ARGV[0])
+
+try_and_log { results.concat(run_cppcheck(project_path, "/usr/bin/cppcheck")) }
+try_and_log { results.concat(run_cppcheck(project_path, "/usr/local/bin/cppcheck")) }
+try_and_log { results.concat(run_clang_check(project_path)) }
+try_and_log { results.concat(run_clang_check(project_path, true)) }
+try_and_log { results.concat(run_clang_tidy(project_path)) }
+try_and_log { results.concat(run_metrix_pp(project_path)) }
+try_and_log { results.concat(run_pmd_cpd(project_path)) }
+try_and_log { results.concat(run_msvc_analyze(project_path, "Debug")) }
+try_and_log { results.concat(run_msvc_64_analyze(project_path, "Debug")) }
+try_and_log { results.concat(run_gcc(project_path, "Debug")) }
+try_and_log { results.concat(run_clang(project_path, "Debug")) }
 
 
 puts(JSON.pretty_generate(results))
+
+File.open("output.json", 'w') { |file| file.write(JSON.pretty_generate(results)) }
 
 #get_include_dirs(File.absolute_path(ARGV[0]))
 #
