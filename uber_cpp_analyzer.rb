@@ -8,6 +8,7 @@ require 'open3'
 require 'json'
 require 'logger'
 require 'set'
+require 'pathname'
 
 $logger = Logger.new "cpp_uber_analyzer.log", 10
 
@@ -224,8 +225,8 @@ def get_sha(src_dir)
   run_script(src_dir, ["git rev-parse HEAD"])
 end
 
-def cmake_configure(src_dir, output_dir, generator, enable_compile_commands, env = {})
-  run_script(output_dir, ["cmake #{src_dir} -G \"#{generator}\" #{ enable_compile_commands ? "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON" : "" } "], env)
+def cmake_configure(src_dir, output_dir, generator, enable_compile_commands, env = {}, args = "")
+  run_script(output_dir, ["cmake #{src_dir} -G \"#{generator}\" #{ enable_compile_commands ? "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON" : "" } #{args}"], env)
 end
 
 def with_compile_commands(src_dir, env={})
@@ -235,15 +236,15 @@ def with_compile_commands(src_dir, env={})
   }
 end
 
-def with_configured_dir(src_dir, generator, env)
+def with_configured_dir(src_dir, generator, env, args="")
   Dir.mktmpdir { |dir|
-    cmake_configure(src_dir, dir, generator, false, env)
+    cmake_configure(src_dir, dir, generator, false, env, args)
     yield dir
   }
 end
 
-def build(dir, configuration)
-  return run_script(dir, ["cmake --build . --config #{configuration}"])
+def build(dir, configuration, cores)
+  return run_script(dir, ["cmake --build . --config #{configuration} -- -j#{cores}"])
 end
 
 def get_compile_commands(compile_commands)
@@ -318,31 +319,62 @@ def parse_gcc_clang_results(output, toolname)
 end
 
 
-def run_clang_tidy(src_dir)
-  with_compile_commands(src_dir, {"CXX"=>"clang++-5.0", "CC"=>"clang-5.0"}) { |compile_commands, working_dir|
+def get_tool_path_version(clangppbin)
+  path = File.dirname(clangppbin)
+  filename = File.basename(clangppbin)
+  version = /.*-(([0-9]\.?)*)/.match(filename) { |m| m[1] }
+
+  return path, version
+end
+
+def get_clang_tools(clangppbin)
+  path, version = get_tool_path_version(clangppbin)
+
+  basepath = Pathname.new(path)
+  versionstring = (version=="") ? ("") : ("-" + version)
+
+  return (basepath + ("clang++" + versionstring)).to_s,
+    (basepath + ("clang" + versionstring)).to_s,
+    (basepath + ("clang-tidy" + versionstring)).to_s,
+    (basepath + ("clang-check" + versionstring)).to_s
+
+end
+
+def get_gcc_tools(gppbin)
+  path, version = get_tool_path_version(gppbin)
+
+  basepath = Pathname.new(path)
+  versionstring = (version=="") ? ("") : ("-" + version)
+
+  return (basepath + ("g++" + versionstring)).to_s,
+    (basepath + ("gcc" + versionstring)).to_s
+
+end
+
+def run_clang_tool(src_dir, clangpp, clang, tool, tool_args, tool_name)
+  
+  with_compile_commands(src_dir, {"CXX"=>clangpp, "CC"=>clang}) { |compile_commands, working_dir|
 
     commands = get_compile_commands(compile_commands)
     files = get_cpp_files(commands).to_a.join(" ")
 
     out, err, result = 
-      run_script(src_dir, ["clang-tidy-5.0 -p #{compile_commands} #{files} -checks=*,-google* -header-filter=.*"])
+      run_script(src_dir, ["#{tool} -p #{compile_commands} #{files} #{tool_args}"])
 
-    return parse_gcc_clang_results(out, "clang-tidy")
+    return parse_gcc_clang_results(err, tool_name)
   }
 end
 
+def run_clang_tidy(src_dir, clangppbin)
+  clangpp, clang, clang_tidy, clang_check = get_clang_tools(clangppbin)
 
-def run_clang_check(src_dir, analyze = false)
-  with_compile_commands(src_dir, {"CXX"=>"clang++-5.0", "CC"=>"clang-5.0"}) { |compile_commands, working_dir|
+  return run_clang_tool(src_dir, clangpp, clang, clang_tidy, "-checks=*,-google* -header-filter=.*", clang_tidy)
+end
 
-    commands = get_compile_commands(compile_commands)
-    files = get_cpp_files(commands).to_a.join(" ")
+def run_clang_check(src_dir, clangppbin, analyze = false)
+  clangpp, clang, clang_tidy, clang_check = get_clang_tools(clangppbin)
 
-    out, err, result = 
-      run_script(src_dir, ["clang-check-5.0 -p #{compile_commands} #{files} #{analyze ? "-analyze" : "" }"])
-
-    return parse_gcc_clang_results(err, "clang-check#{ analyze ? "-analyze" : "" }")
-  }
+  return run_clang_tool(src_dir, clangpp, clang, clang_check, analyze ? "-analyze" : "", clang_check + analyze ? " analyze" : "")
 end
 
 def run_metrix_pp(src_dir)
@@ -429,19 +461,63 @@ def run_msvc_analyze(src_dir, configuration)
   }
 end
 
-def run_gcc(src_dir, configuration)
-  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>"g++-6", "CC"=>"gcc-6", "CXXFLAGS"=>`./get_valid_gcc_flags.sh g++-6`}) { |dir|
-    out, err, result = build(dir, configuration)
+def get_binary_sizes(name, dir)
+  files = []
 
-    return parse_gcc_clang_results(err, "g++-6")
+  Dir.glob( "#{dir}/**/*" ) { |file|
+    if File.executable?(file) && !File.directory?(file)
+      files << { "tool"=>name, "binary"=>Pathname.new(file).relative_path_from(Pathname.new(dir)), "size"=>File.size(file), "fullpath"=>file }
+    end
+  }
+
+  return files;
+end
+
+def test(bindir, configuration, num_cores, toolname)
+  run_script(bindir, ["ctest --build-config #{configuration} -j#{num_cores}"])
+
+  performance = []
+
+  Dir.glob( "#{bindir}/**/callgrind.performance.*" ) { |file|
+    lines = IO.readlines(file)
+    last = lines.last
+    /.*:\s*([0-9]*)/.match(last) { |m| 
+      performance << { "tool" => toolname, "test_name"=>Pathname.new(file).relative_path_from(Pathname.new(bindir)), "timing"=>m[1]  } 
+    }
+  }
+
+  return performance
+end
+  
+def run_gcc(src_dir, gppbin, configuration, config_flags, num_cores, run_test)
+  gpp, gcc = get_gcc_tools(gppbin)
+  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>gpp, "CC"=>gcc, "CXXFLAGS"=>`./get_valid_gcc_flags.sh #{gppbin}`}, config_flags) { |dir|
+    out, err, result = build(dir, configuration, num_cores)
+
+    toolname = gpp + " " + configuration
+
+    test_results = []
+    if run_test 
+      test_results = test(dir, configuration, num_cores, toolname)
+    end
+
+    return parse_gcc_clang_results(err, toolname).concat(get_binary_sizes(toolname, dir)).concat(test_results)
   }
 end
 
-def run_clang(src_dir, configuration)
-  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>"clang++-5.0", "CC"=>"clang-5.0", "CXXFLAGS"=>"-Weverything"}) { |dir|
-    out, err, result = build(dir, configuration)
+def run_clang(src_dir, clangppbin, configuration, config_flags, num_cores, run_test)
+  clangpp, clang, clang_tidy, clang_check = get_clang_tools(clangppbin)
+  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>clangpp, "CC"=>clang, "CXXFLAGS"=>"-Weverything"}, config_flags) { |dir|
+    out, err, result = build(dir, configuration, num_cores)
 
-    return parse_gcc_clang_results(err, "clang++-5")
+    toolname = clangpp + " " + configuration
+
+    test_results = []
+    if run_test 
+      test_results = test(dir, configuration, num_cores, toolname)
+    end
+
+    return parse_gcc_clang_results(err, toolname).concat(get_binary_sizes(toolname, dir)).concat(test_results)
   }
 end
 
@@ -465,19 +541,47 @@ end
 
 results = []
 
+
+paths = ENV["PATH"].split(":")
+
+clangs = []
+paths.each{ |p| clangs.concat(Dir.glob( "#{p}/clang++*" )) }
+gccs = []
+paths.each{ |p| gccs.concat(Dir.glob( "#{p}/g++*" )) }
+cppchecks = []
+paths.each{ |p| cppchecks.concat(Dir.glob( "#{p}/cppcheck*" )) }
+
+
+
+
+clangs.each{ |bin| 
+  path, ver = get_tool_path_version(bin)
+  puts "Found clang: #{bin}: '#{path}' '#{ver}'"
+}
+
+
+
 project_path = File.absolute_path(ARGV[0])
 
-try_and_log { results.concat(run_cppcheck(project_path, "/usr/bin/cppcheck")) }
-try_and_log { results.concat(run_cppcheck(project_path, "/usr/local/bin/cppcheck")) }
-try_and_log { results.concat(run_clang_check(project_path)) }
-try_and_log { results.concat(run_clang_check(project_path, true)) }
-try_and_log { results.concat(run_clang_tidy(project_path)) }
-try_and_log { results.concat(run_metrix_pp(project_path)) }
-try_and_log { results.concat(run_pmd_cpd(project_path)) }
-try_and_log { results.concat(run_msvc_analyze(project_path, "Debug")) }
-try_and_log { results.concat(run_msvc_64_analyze(project_path, "Debug")) }
-try_and_log { results.concat(run_gcc(project_path, "Debug")) }
-try_and_log { results.concat(run_clang(project_path, "Debug")) }
+config_flags = "-DUSE_LIBCXX:BOOL=OFF -DRUN_PERFORMANCE_TESTS:BOOL=ON"
+num_cores = 8
+run_test = false
+
+#cppchecks.each{ |bin| try_and_log { results.concat(run_cppcheck(project_path, bin)) } }
+#clangs.each{ |bin| try_and_log { results.concat(run_clang_check(project_path, bin)) } }
+#clangs.each{ |bin| try_and_log { results.concat(run_clang_check(project_path, bin, true)) } }
+#clangs.each{ |bin| try_and_log { results.concat(run_clang_tidy(project_path, bin)) } }
+#clangs.each{ |bin| try_and_log { results.concat(run_clang(project_path, bin, "Debug", config_flags, num_cores, run_test)) } }
+try_and_log { results.concat(run_clang(project_path, clangs[0], "Release", config_flags, num_cores, run_test)) }
+try_and_log { results.concat(run_clang(project_path, clangs[0], "Debug", config_flags, num_cores, run_test)) }
+#clangs.each{ |bin| try_and_log { results.concat(run_clang(project_path, bin, "Release", config_flags, num_cores, run_test)) } }
+#gccs.each{ |bin| try_and_log { results.concat(run_gcc(project_path, bin, "Debug", config_flags, num_cores, run_test)) } }
+#gccs.each{ |bin| try_and_log { results.concat(run_gcc(project_path, bin, "Release", config_flags, num_cores, run_test)) } }
+
+#try_and_log { results.concat(run_metrix_pp(project_path)) }
+#try_and_log { results.concat(run_pmd_cpd(project_path)) }
+#try_and_log { results.concat(run_msvc_analyze(project_path, "Debug")) }
+#try_and_log { results.concat(run_msvc_64_analyze(project_path, "Debug")) }
 
 
 puts(JSON.pretty_generate(results))
@@ -487,7 +591,4 @@ File.open("output.json", 'w') { |file| file.write(JSON.pretty_generate(results))
 #get_include_dirs(File.absolute_path(ARGV[0]))
 #
 #
-
-
-
 
