@@ -222,23 +222,23 @@ def run_script(run_dir, commands, env={})
 end
 
 def get_sha(src_dir)
-  run_script(src_dir, ["git rev-parse HEAD"])
+  run_script(src_dir, ["git rev-parse HEAD"])[0].strip()
 end
 
-def cmake_configure(src_dir, output_dir, generator, enable_compile_commands, env = {}, args = "")
-  run_script(output_dir, ["cmake #{src_dir} -G \"#{generator}\" #{ enable_compile_commands ? "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON" : "" } #{args}"], env)
+def cmake_configure(src_dir, output_dir, generator, build_type, enable_compile_commands, env = {}, args = "")
+  run_script(output_dir, ["cmake #{src_dir}  -G \"#{generator}\" -DCMAKE_BUILD_TYPE:STRING=#{build_type} #{ enable_compile_commands ? "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON" : "" } #{args}"], env)
 end
 
-def with_compile_commands(src_dir, env={})
+def with_compile_commands(src_dir, build_type, env={})
   Dir.mktmpdir { |dir|
-    cmake_configure(src_dir, dir, "Unix Makefiles", true, env)
+    cmake_configure(src_dir, dir, "Unix Makefiles", build_type, true, env)
     yield File.join(dir, "compile_commands.json"), dir
   }
 end
 
-def with_configured_dir(src_dir, generator, env, args="")
+def with_configured_dir(src_dir, generator, build_type, env, args="")
   Dir.mktmpdir { |dir|
-    cmake_configure(src_dir, dir, generator, false, env, args)
+    cmake_configure(src_dir, dir, generator, build_type, false, env, args)
     yield dir
   }
 end
@@ -277,7 +277,7 @@ end
 def run_cppcheck(src_dir, bin)
   results = []
 
-  with_compile_commands(src_dir) { |compile_commands, working_dir|
+  with_compile_commands(src_dir, "Debug") { |compile_commands, working_dir|
 
     commands = get_compile_commands(compile_commands)
     includes = get_include_dirs(commands).collect { |i| " -I " + i }.join("")
@@ -311,7 +311,7 @@ def parse_gcc_clang_results(output, toolname)
     /(?<filename>.*):(?<linenumber>[0-9]+):(?<colnumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
 
     if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
-      results << { "tool" => toolname, "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
+      results << { "type" => "analysis",  "tool" => toolname, "file" => filename, "line" => linenumber, "column" => colnumber, "severity" => messagetype, "message" => message }
     end
   }
 
@@ -351,9 +351,9 @@ def get_gcc_tools(gppbin)
 
 end
 
-def run_clang_tool(src_dir, clangpp, clang, tool, tool_args, tool_name)
+def run_clang_tool(src_dir, build_type, clangpp, clang, tool, tool_args, tool_name)
   
-  with_compile_commands(src_dir, {"CXX"=>clangpp, "CC"=>clang}) { |compile_commands, working_dir|
+  with_compile_commands(src_dir, build_type, {"CXX"=>clangpp, "CC"=>clang}) { |compile_commands, working_dir|
 
     commands = get_compile_commands(compile_commands)
     files = get_cpp_files(commands).to_a.join(" ")
@@ -365,13 +365,13 @@ def run_clang_tool(src_dir, clangpp, clang, tool, tool_args, tool_name)
   }
 end
 
-def run_clang_tidy(src_dir, clangppbin)
+def run_clang_tidy(src_dir, build_type, clangppbin)
   clangpp, clang, clang_tidy, clang_check = get_clang_tools(clangppbin)
 
   return run_clang_tool(src_dir, clangpp, clang, clang_tidy, "-checks=*,-google* -header-filter=.*", clang_tidy)
 end
 
-def run_clang_check(src_dir, clangppbin, analyze = false)
+def run_clang_check(src_dir, build_type, clangppbin, analyze = false)
   clangpp, clang, clang_tidy, clang_check = get_clang_tools(clangppbin)
 
   return run_clang_tool(src_dir, clangpp, clang, clang_check, analyze ? "-analyze" : "", clang_check + analyze ? " analyze" : "")
@@ -380,7 +380,7 @@ end
 def run_metrix_pp(src_dir)
   results = []
 
-  with_compile_commands(src_dir) { |compile_commands, working_dir|
+  with_compile_commands(src_dir, "Debug") { |compile_commands, working_dir|
 
     commands = get_compile_commands(compile_commands)
     files = get_cpp_files(commands).to_a.join(" ")
@@ -394,7 +394,7 @@ def run_metrix_pp(src_dir)
       /(?<filename>.*):(?<linenumber>[0-9]+): (?<messagetype>.+?): (?<message>.*)/ =~ e
 
       if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
-        results << { "tool" => "metrix++", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message }
+        results << { "type" => "analysis", "tool" => "metrix++", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message }
       end
     }
   }
@@ -420,7 +420,7 @@ def run_pmd_cpd(src_dir)
       if !linenum.nil? and !filename.nil?
         dups << { "file" => filename, "line" => linenum }
       else
-        results << { "tool" => "pmd_cpd", "severity" => "copy-paste", "numlines" => numlines, "locations" => dups }
+        results << {"tool" => "pmd_cpd", "severity" => "copy-paste", "numlines" => numlines, "locations" => dups }
         dups = []
         numlines = 0
       end
@@ -445,7 +445,7 @@ def parse_msvc_results(output)
     /\s*(?<filename>.*)\((?<linenumber>[0-9]+)\): (?<messagetype>\S+) (?<id>\S+): (?<message>.+) \[.*\]/ =~ e
 
     if !filename.nil? && !messagetype.nil? && messagetype != "info" && messagetype != "note"
-      results << { "tool" => "msvc", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message, "id" => id }
+      results << { "type" => "analysis", "tool" => "msvc", "file" => filename, "line" => linenumber, "severity" => messagetype, "message" => message, "id" => id }
     end
   }
 
@@ -454,7 +454,7 @@ def parse_msvc_results(output)
 end
 
 def run_msvc_analyze(src_dir, configuration)
-  with_configured_dir(src_dir, "Visual Studio 14 2015",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
+  with_configured_dir(src_dir, "Visual Studio 14 2015", configuration, {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
     out, err, result = build(dir, configuration)
 
     return parse_msvc_results(out)
@@ -466,7 +466,7 @@ def get_binary_sizes(name, dir)
 
   Dir.glob( "#{dir}/**/*" ) { |file|
     if File.executable?(file) && !File.directory?(file)
-      files << { "tool"=>name, "binary"=>Pathname.new(file).relative_path_from(Pathname.new(dir)), "size"=>File.size(file), "fullpath"=>file }
+      files << { "type" => "binaries",  "tool"=>name, "binary"=>Pathname.new(file).relative_path_from(Pathname.new(dir)), "size"=>File.size(file), "fullpath"=>file }
     end
   }
 
@@ -482,7 +482,7 @@ def test(bindir, configuration, num_cores, toolname)
     lines = IO.readlines(file)
     last = lines.last
     /.*:\s*([0-9]*)/.match(last) { |m| 
-      performance << { "tool" => toolname, "test_name"=>Pathname.new(file).relative_path_from(Pathname.new(bindir)), "timing"=>m[1]  } 
+      performance << { "type" => "performance",  "tool" => toolname, "test_name"=>Pathname.new(file).relative_path_from(Pathname.new(bindir)), "timing"=>m[1]  } 
     }
   }
 
@@ -491,7 +491,7 @@ end
   
 def run_gcc(src_dir, gppbin, configuration, config_flags, num_cores, run_test)
   gpp, gcc = get_gcc_tools(gppbin)
-  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>gpp, "CC"=>gcc, "CXXFLAGS"=>`./get_valid_gcc_flags.sh #{gppbin}`}, config_flags) { |dir|
+  with_configured_dir(src_dir, "Unix Makefiles", configuration, {"CXX"=>gpp, "CC"=>gcc, "CXXFLAGS"=>`./get_valid_gcc_flags.sh #{gppbin}`}, config_flags) { |dir|
     out, err, result = build(dir, configuration, num_cores)
 
     toolname = gpp + " " + configuration
@@ -507,7 +507,7 @@ end
 
 def run_clang(src_dir, clangppbin, configuration, config_flags, num_cores, run_test)
   clangpp, clang, clang_tidy, clang_check = get_clang_tools(clangppbin)
-  with_configured_dir(src_dir, "Unix Makefiles", {"CXX"=>clangpp, "CC"=>clang, "CXXFLAGS"=>"-Weverything"}, config_flags) { |dir|
+  with_configured_dir(src_dir, "Unix Makefiles", configuration, {"CXX"=>clangpp, "CC"=>clang, "CXXFLAGS"=>"-Weverything"}, config_flags) { |dir|
     out, err, result = build(dir, configuration, num_cores)
 
     toolname = clangpp + " " + configuration
@@ -523,7 +523,7 @@ end
 
 
 def run_msvc_64_analyze(src_dir, configuration)
-  with_configured_dir(src_dir, "Visual Studio 14 2015 Win64",  {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
+  with_configured_dir(src_dir, "Visual Studio 14 2015 Win64", configuration, {"CXXFLAGS"=>"/analyze", "CFLAGS"=>"/analyze"}) { |dir|
     out, err, result = build(dir, configuration)
 
     return parse_msvc_results(out)
@@ -565,28 +565,34 @@ project_path = File.absolute_path(ARGV[0])
 
 config_flags = "-DUSE_LIBCXX:BOOL=OFF -DRUN_PERFORMANCE_TESTS:BOOL=ON"
 num_cores = 8
-run_test = false
+run_test = true
 
 #cppchecks.each{ |bin| try_and_log { results.concat(run_cppcheck(project_path, bin)) } }
 #clangs.each{ |bin| try_and_log { results.concat(run_clang_check(project_path, bin)) } }
 #clangs.each{ |bin| try_and_log { results.concat(run_clang_check(project_path, bin, true)) } }
 #clangs.each{ |bin| try_and_log { results.concat(run_clang_tidy(project_path, bin)) } }
-#clangs.each{ |bin| try_and_log { results.concat(run_clang(project_path, bin, "Debug", config_flags, num_cores, run_test)) } }
-try_and_log { results.concat(run_clang(project_path, clangs[0], "Release", config_flags, num_cores, run_test)) }
-try_and_log { results.concat(run_clang(project_path, clangs[0], "Debug", config_flags, num_cores, run_test)) }
-#clangs.each{ |bin| try_and_log { results.concat(run_clang(project_path, bin, "Release", config_flags, num_cores, run_test)) } }
-#gccs.each{ |bin| try_and_log { results.concat(run_gcc(project_path, bin, "Debug", config_flags, num_cores, run_test)) } }
-#gccs.each{ |bin| try_and_log { results.concat(run_gcc(project_path, bin, "Release", config_flags, num_cores, run_test)) } }
+clangs.each{ |bin| try_and_log { results.concat(run_clang(project_path, bin, "Debug", config_flags, num_cores, run_test)) } }
+clangs.each{ |bin| try_and_log { results.concat(run_clang(project_path, bin, "Release", config_flags, num_cores, run_test)) } }
+gccs.each{ |bin| try_and_log { results.concat(run_gcc(project_path, bin, "Debug", config_flags, num_cores, run_test)) } }
+gccs.each{ |bin| try_and_log { results.concat(run_gcc(project_path, bin, "Release", config_flags, num_cores, run_test)) } }
+
+
+#try_and_log { results.concat(run_clang(project_path, clangs[0], "Release", config_flags, num_cores, run_test)) }
+#try_and_log { results.concat(run_clang(project_path, clangs[0], "Debug", config_flags, num_cores, run_test)) }
 
 #try_and_log { results.concat(run_metrix_pp(project_path)) }
 #try_and_log { results.concat(run_pmd_cpd(project_path)) }
 #try_and_log { results.concat(run_msvc_analyze(project_path, "Debug")) }
 #try_and_log { results.concat(run_msvc_64_analyze(project_path, "Debug")) }
 
+sha = get_sha(project_path)
+
+results.each{ |x| x["sha"] = sha; }
 
 puts(JSON.pretty_generate(results))
 
-File.open("output.json", 'w') { |file| file.write(JSON.pretty_generate(results)) }
+
+File.open("#{sha}.json", 'w') { |file| file.write(JSON.pretty_generate(results)) }
 
 #get_include_dirs(File.absolute_path(ARGV[0]))
 #
